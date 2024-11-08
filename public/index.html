@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Demo</title>
+</head>
+<body>
+    <h1>Basic WebRTC Application</h1>
+    <input type="text" id="room" placeholder="Enter room name" />
+    <button id="joinRoom">Join Room</button>
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const joinRoomButton = document.getElementById('joinRoom');
+        const roomInput = document.getElementById('room');
+        
+        let room;
+        const socket = io();
+        const peerConnection = new RTCPeerConnection();
+
+        // Get local media stream
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then((stream) => {
+                localVideo.srcObject = stream;
+                stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+            })
+            .catch(error => console.error('Error accessing media devices:', error));
+
+        peerConnection.ontrack = (event) => {
+            remoteVideo.srcObject = event.streams[0];
+        };
+
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit('candidate', { candidate: event.candidate, room });
+            }
+        };
+
+        // Join room logic
+        joinRoomButton.onclick = () => {
+            room = roomInput.value;
+            if (room) {
+                socket.emit('join', room);
+            }
+        };
+
+        socket.on('joined', () => {
+            console.log('You joined room:', room);
+        });
+
+        socket.on('offer', async (offer) => {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('answer', { answer, room });
+        });
+
+        socket.on('answer', async (answer) => {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        });
+
+        socket.on('candidate', async (candidate) => {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+
+        // Create an offer if you are the second participant
+        socket.on('ready', async () => {
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('offer', { offer, room });
+        });
+    </script>
+</body>
+</html>
